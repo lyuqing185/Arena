@@ -158,12 +158,12 @@ candidate_1_idx = st.session_state.candidate_1_idx
 candidate_2_idx = st.session_state.candidate_2_idx
 
 
-st.info("Preview mode: Submissions are saved to local preview_results.csv")
+
 
 user_id = st.text_input("User ID", placeholder="e.g. user_001")
 
 
-st.markdown("<p style='font-size:28px; font-weight:700;'>Assume you are talking with a generative AI assistant.</p>", unsafe_allow_html=True)
+
 st.markdown(f"### Question\n{sample['question']}")
 
 
