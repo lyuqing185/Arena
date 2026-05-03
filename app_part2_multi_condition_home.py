@@ -286,7 +286,7 @@ def render_previous_context(context_raw: str, turn):
 
 def render_question_title(label: str):
     st.markdown(
-        f"<p style='font-size:20px; font-weight:600; margin: 0.5rem 0 0.2rem 0;'>{label}</p>",
+        f"<p style='font-size:18px; font-weight:600; margin: 0.5rem 0 0.2rem 0;'>{label}</p>",
         unsafe_allow_html=True,
     )
 
@@ -304,7 +304,7 @@ def inject_scale_css_once():
         """
         <style>
         .scale-endpoint {
-            font-size: 20px;
+            font-size: 18px;
             color: #4F4F4F;
             line-height: 1.25;
             padding-top: 1.15rem;
@@ -362,7 +362,7 @@ def inject_layout_css():
         }
 
         div[role="radiogroup"] label p {
-            font-size: 20px !important;
+            font-size: 18px !important;
         }
         </style>
         """
