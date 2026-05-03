@@ -12,7 +12,7 @@ st.set_page_config(
     layout="wide",
 )
 
-DATA_PATH = os.path.join("git", "stage4_reorganized_top4_thr0_65_with_id.csv")
+DATA_PATH = "stage4_reorganized_top4_thr0_65_with_id.csv"
 LOCAL_RESULTS_PATH = os.path.join("preview_results_part2.csv")
 VALID_CONDITIONS = ["C1", "C2", "C3", "C4", "C5"]
 
