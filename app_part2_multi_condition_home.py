@@ -11,7 +11,8 @@ st.set_page_config(
     layout="wide",
 )
 
-DATA_PATH = "stage4_reorganized_top4_thr0_65_with_id.csv"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(BASE_DIR, "stage4_reorganized_top4_thr0_65_with_id.csv")
 LOCAL_RESULTS_PATH = os.path.join("preview_results_part2.csv")
 VALID_CONDITIONS = ["C1", "C2", "C3", "C4", "C5"]
 
@@ -197,7 +198,11 @@ def build_task_pool_for_condition(samples, condition):
     return task_pool
 
 
-def load_completed_sample_ids(results_path, condition):
+def is_skipped_row(row: dict) -> bool:
+    return str(row.get("skipped", "")).strip().lower() == "yes"
+
+
+def load_completed_sample_ids(results_path, condition, include_skipped: bool = False):
     if not os.path.exists(results_path):
         return set()
 
@@ -206,6 +211,8 @@ def load_completed_sample_ids(results_path, condition):
         reader = csv.DictReader(f)
         for row in reader:
             if row.get("condition", "") != condition:
+                continue
+            if not include_skipped and is_skipped_row(row):
                 continue
             sample_id = row.get("sample_id", "")
             if sample_id:
@@ -218,6 +225,14 @@ def get_next_unfinished_task(task_pool, completed_ids):
         if task["sample_id"] not in completed_ids:
             return task
     return None
+
+
+def get_task_position(task_pool, current_task):
+    current_id = current_task["sample_id"]
+    for idx, task in enumerate(task_pool, start=1):
+        if task["sample_id"] == current_id:
+            return idx
+    return 1
 
 
 # ================== Main Streamlit App ==================
@@ -511,8 +526,9 @@ if condition is None:
 config = CONDITION_CONFIG[condition]
 
 task_pool = build_task_pool_for_condition(data, condition)
-completed_ids = load_completed_sample_ids(LOCAL_RESULTS_PATH, condition)
-current_task = get_next_unfinished_task(task_pool, completed_ids)
+completed_ids = load_completed_sample_ids(LOCAL_RESULTS_PATH, condition, include_skipped=False)
+handled_ids = load_completed_sample_ids(LOCAL_RESULTS_PATH, condition, include_skipped=True)
+current_task = get_next_unfinished_task(task_pool, handled_ids)
 
 if not task_pool:
     st.error("No valid samples were found for this condition.")
@@ -539,6 +555,12 @@ with col_right:
 
 st.markdown(
     f"<div style='color:#666; font-size:0.95rem;'>Completed tasks: {len(completed_ids)} / {len(task_pool)}</div>",
+    unsafe_allow_html=True,
+)
+
+current_position = get_task_position(task_pool, current_task)
+st.markdown(
+    f"<div style='color:#666; font-size:0.95rem;'>Current sample: {current_position} / {len(task_pool)}</div>",
     unsafe_allow_html=True,
 )
 
@@ -628,7 +650,7 @@ for q_key, label, left_text, right_text in scale_questions_after_ad:
     )
 
 
-def save_result(sample, user_id, condition, response_source, choices):
+def save_result(sample, user_id, condition, response_source, choices, skipped: bool = False):
     payload = {
         "sample_id": sample["id"],
         "user_id": user_id,
@@ -637,13 +659,14 @@ def save_result(sample, user_id, condition, response_source, choices):
         "response_source": response_source,
         "ad_present": CONDITION_CONFIG[condition]["ad_present"],
         "disclosure_type": CONDITION_CONFIG[condition]["disclosure_type"],
-        "Q1": choices.get("Q1", ""),
-        "Q2": choices.get("Q2", ""),
-        "Q3": choices.get("Q3", ""),
-        "Q4": choices.get("Q4", ""),
-        "Q5": choices.get("Q5", ""),
-        "Q6": choices.get("Q6", ""),
-        "Q7": choices.get("Q7", ""),
+        "Q1": choices.get("Q1", "") if not skipped else "",
+        "Q2": choices.get("Q2", "") if not skipped else "",
+        "Q3": choices.get("Q3", "") if not skipped else "",
+        "Q4": choices.get("Q4", "") if not skipped else "",
+        "Q5": choices.get("Q5", "") if not skipped else "",
+        "Q6": choices.get("Q6", "") if not skipped else "",
+        "Q7": choices.get("Q7", "") if not skipped else "",
+        "skipped": "yes" if skipped else "no",
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -654,7 +677,7 @@ def save_result(sample, user_id, condition, response_source, choices):
             fieldnames=[
                 "sample_id", "user_id", "condition", "question", "response_source",
                 "ad_present", "disclosure_type", "Q1", "Q2", "Q3", "Q4", "Q5",
-                "Q6", "Q7", "timestamp"
+                "Q6", "Q7", "skipped", "timestamp"
             ],
         )
         if not file_exists:
@@ -662,7 +685,14 @@ def save_result(sample, user_id, condition, response_source, choices):
         writer.writerow(payload)
 
 
-if st.button("Submit"):
+col_submit, col_spacer, col_skip = st.columns([1, 0.5, 1])
+with col_submit:
+    submit_clicked = st.button("Submit", use_container_width=True)
+
+with col_skip:
+    skip_clicked = st.button("Skip", use_container_width=True)
+
+if submit_clicked:
     required_keys = ["Q1", "Q2", "Q3", "Q4", "Q6", "Q7"]
     if choices.get("Q4") == "Yes":
         required_keys.append("Q5")
@@ -678,4 +708,13 @@ if st.button("Submit"):
 
     save_result(sample, user_id.strip(), condition, response_source, choices)
     st.success("Saved!")
+    st.rerun()
+
+if skip_clicked:
+    if not user_id.strip():
+        st.warning("Please enter your User ID before skipping.")
+        st.stop()
+
+    save_result(sample, user_id.strip(), condition, response_source, choices, skipped=True)
+    st.info("Skipped.")
     st.rerun()

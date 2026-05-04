@@ -249,7 +249,11 @@ def render_previous_context(context_raw: str, turn):
                 st.divider()
 
 
-def load_completed_task_ids(results_path):
+def is_skipped_row(row: dict) -> bool:
+    return str(row.get("skipped", "")).strip().lower() == "yes"
+
+
+def load_completed_task_ids(results_path, include_skipped: bool = False):
     if not os.path.exists(results_path):
         return set()
 
@@ -257,18 +261,27 @@ def load_completed_task_ids(results_path):
     with open(results_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if not include_skipped and is_skipped_row(row):
+                continue
             task_id = row.get("task_id", "")
             if task_id:
                 completed.add(task_id)
     return completed
 
 
-def get_next_unfinished_task(task_pool, results_path):
-    completed = load_completed_task_ids(results_path)
+def get_next_unfinished_task(task_pool, completed_ids):
     for task in task_pool:
-        if task["task_id"] not in completed:
-            return task, completed
-    return None, completed
+        if task["task_id"] not in completed_ids:
+            return task
+    return None
+
+
+def get_task_position(task_pool, current_task):
+    current_id = current_task["task_id"]
+    for idx, task in enumerate(task_pool, start=1):
+        if task["task_id"] == current_id:
+            return idx
+    return 1
 
 
 def prepare_display_task(task):
@@ -318,7 +331,7 @@ def winner_field(choice, display_task):
     return ""
 
 
-def save_result(display_task, user_id, choices):
+def save_result(display_task, user_id, choices, skipped: bool = False):
     payload = {
         "task_id": display_task["task_id"],
         "sample_id": display_task["sample_id"],
@@ -329,13 +342,14 @@ def save_result(display_task, user_id, choices):
         "left_field": display_task["left_field"],
         "right_field": display_task["right_field"],
         "display_order": display_task["display_order"],
+        "skipped": "yes" if skipped else "no",
         "timestamp": datetime.utcnow().isoformat(),
     }
 
     for q_key in Q_KEYS:
         raw_choice = choices.get(q_key, "")
-        payload[f"{q_key}_choice"] = choice_to_machine_value(raw_choice)
-        payload[f"{q_key}_winner_field"] = winner_field(raw_choice, display_task)
+        payload[f"{q_key}_choice"] = "" if skipped else choice_to_machine_value(raw_choice)
+        payload[f"{q_key}_winner_field"] = "" if skipped else winner_field(raw_choice, display_task)
 
     fieldnames = [
         "task_id", "sample_id", "user_id", "question",
@@ -346,6 +360,7 @@ def save_result(display_task, user_id, choices):
         "Q3_choice", "Q3_winner_field",
         "Q4_choice", "Q4_winner_field",
         "Q5_choice", "Q5_winner_field",
+        "skipped",
         "timestamp",
     ]
 
@@ -384,13 +399,22 @@ def main():
         st.session_state["_last_data_source_msg"] = data_source_msg
 
     task_pool = build_task_pool(data)
-    task, completed = get_next_unfinished_task(task_pool, LOCAL_RESULTS_PATH)
+    completed = load_completed_task_ids(LOCAL_RESULTS_PATH, include_skipped=False)
+    handled = load_completed_task_ids(LOCAL_RESULTS_PATH, include_skipped=True)
+    task = get_next_unfinished_task(task_pool, handled)
 
     st.title("Part 1 Position Survey")
     st.markdown(
         f"<div class='meta-text'>Completed tasks: {len(completed)} / {len(task_pool)}</div>",
         unsafe_allow_html=True,
     )
+
+    if task is not None:
+        current_position = get_task_position(task_pool, task)
+        st.markdown(
+            f"<div class='meta-text'>Current task: {current_position} / {len(task_pool)}</div>",
+            unsafe_allow_html=True,
+        )
 
     if not task_pool:
         st.error("No valid candidate pairs were found. Please check whether candidate fields are present and non-empty.")
@@ -434,7 +458,13 @@ def main():
             horizontal=True,
         )
 
-    if st.button("Submit"):
+    col_submit, col_spacer, col_skip = st.columns([1, 0.5, 1])
+    with col_submit:
+        submit_clicked = st.button("Submit", use_container_width=True)
+    with col_skip:
+        skip_clicked = st.button("Skip", use_container_width=True)
+
+    if submit_clicked:
         if not user_id.strip():
             st.warning("Please enter your User ID before submitting.")
             st.stop()
@@ -451,6 +481,21 @@ def main():
             del st.session_state[order_key]
 
         st.success("Saved!")
+        st.rerun()
+
+    if skip_clicked:
+        if not user_id.strip():
+            st.warning("Please enter your User ID before skipping.")
+            st.stop()
+
+        save_result(display_task, user_id.strip(), choices, skipped=True)
+        reset_choice_state(display_task["task_id"])
+
+        order_key = f"display_order_{display_task['task_id']}"
+        if order_key in st.session_state:
+            del st.session_state[order_key]
+
+        st.info("Skipped.")
         st.rerun()
 
 
