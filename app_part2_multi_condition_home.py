@@ -1,5 +1,4 @@
 import streamlit as st
-import random
 import csv
 from datetime import datetime
 import os
@@ -181,6 +180,44 @@ def get_sample_for_condition(sample, condition):
         return sample.get("candidate4'", ""), "candidate4'"
     if condition in ["C2", "C4"]:
         return sample["candidate_4"], "candidate_4"
+
+
+# ================== Task helpers ==================
+def build_task_pool_for_condition(samples, condition):
+    task_pool = []
+    for sample in samples:
+        response_text, response_source = get_sample_for_condition(sample, condition)
+        if response_text and str(response_text).strip():
+            task_pool.append({
+                "sample_id": str(sample.get("id", "")),
+                "sample": sample,
+                "response_text": response_text,
+                "response_source": response_source,
+            })
+    return task_pool
+
+
+def load_completed_sample_ids(results_path, condition):
+    if not os.path.exists(results_path):
+        return set()
+
+    completed = set()
+    with open(results_path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get("condition", "") != condition:
+                continue
+            sample_id = row.get("sample_id", "")
+            if sample_id:
+                completed.add(str(sample_id))
+    return completed
+
+
+def get_next_unfinished_task(task_pool, completed_ids):
+    for task in task_pool:
+        if task["sample_id"] not in completed_ids:
+            return task
+    return None
 
 
 # ================== Main Streamlit App ==================
@@ -473,12 +510,21 @@ if condition is None:
 
 config = CONDITION_CONFIG[condition]
 
-sample_key = f"current_sample_{condition}"
-if sample_key not in st.session_state:
-    st.session_state[sample_key] = random.choice(data)
-sample = st.session_state[sample_key]
+task_pool = build_task_pool_for_condition(data, condition)
+completed_ids = load_completed_sample_ids(LOCAL_RESULTS_PATH, condition)
+current_task = get_next_unfinished_task(task_pool, completed_ids)
 
-response_text, response_source = get_sample_for_condition(sample, condition)
+if not task_pool:
+    st.error("No valid samples were found for this condition.")
+    st.stop()
+
+if current_task is None:
+    st.success("All samples for this condition have been completed.")
+    st.stop()
+
+sample = current_task["sample"]
+response_text = current_task["response_text"]
+response_source = current_task["response_source"]
 
 
 col_left, col_right = st.columns([3, 1])
@@ -490,6 +536,11 @@ with col_right:
     if st.button("Back to home", key="back_home"):
         back_to_home()
         st.rerun()
+
+st.markdown(
+    f"<div style='color:#666; font-size:0.95rem;'>Completed tasks: {len(completed_ids)} / {len(task_pool)}</div>",
+    unsafe_allow_html=True,
+)
 
 user_id = st.text_input("User ID", placeholder="e.g. user_001")
 
@@ -627,5 +678,4 @@ if st.button("Submit"):
 
     save_result(sample, user_id.strip(), condition, response_source, choices)
     st.success("Saved!")
-    st.session_state[sample_key] = random.choice(data)
     st.rerun()
