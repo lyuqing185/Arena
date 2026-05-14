@@ -8,7 +8,7 @@ import io
 from itertools import combinations
 from urllib.request import urlopen
 from urllib.error import URLError
-
+from supabase import create_client, Client
 st.set_page_config(
     page_title="Part 1 Position Survey",
     layout="wide",
@@ -18,7 +18,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "stage4_reorganized_top4_thr0_65_with_id.csv")
 LOCAL_RESULTS_PATH = os.path.join("preview_results_part1_candidate.csv")
 DATA_CSV_URL = os.getenv("DATA_CSV_URL", "")
-
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Current program version: ordinary candidate fields only.
 # For the prime version, copy this file and change CANDIDATE_FIELD_SPECS.
 CANDIDATE_FIELD_SPECS = [
@@ -367,12 +369,7 @@ def save_result(display_task, user_id, choices, issue_note="", skipped: bool = F
         "timestamp",
     ]
 
-    file_exists = os.path.exists(LOCAL_RESULTS_PATH)
-    with open(LOCAL_RESULTS_PATH, "a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(payload)
+    supabase.table("part1_results").insert(payload).execute()
 
 
 def reset_choice_state(task_id):
