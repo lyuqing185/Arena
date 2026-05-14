@@ -14,94 +14,8 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "stage4_reorganized_top4_thr0_65_with_id.csv")
-ASSIGNMENTS_PATH = os.path.join(BASE_DIR, "assignments.csv")
 LOCAL_RESULTS_PATH = os.path.join("preview_results_part2.csv")
 VALID_CONDITIONS = ["C1", "C2", "C3", "C4", "C5"]
-SUPABASE_TABLE = "part2_results"
-
-
-def get_secret_value(*keys):
-    for key in keys:
-        try:
-            value = st.secrets[key]
-            if value:
-                return str(value)
-        except Exception:
-            pass
-    return ""
-
-
-@st.cache_resource
-def get_supabase_client():
-    try:
-        from supabase import create_client
-    except ImportError:
-        st.error("The `supabase` package is not installed. Run: pip install supabase")
-        st.stop()
-
-    url = get_secret_value("SUPABASE_URL", "supabase_url")
-    key = get_secret_value("SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "supabase_key")
-
-    try:
-        if not url:
-            url = str(st.secrets["supabase"]["url"])
-        if not key:
-            key = str(st.secrets["supabase"]["key"])
-    except Exception:
-        pass
-
-    if not url or not key:
-        st.error(
-            "Missing Supabase secrets. Add SUPABASE_URL and SUPABASE_KEY, "
-            "or [supabase].url and [supabase].key, to Streamlit secrets."
-        )
-        st.stop()
-
-    return create_client(url, key)
-
-
-@st.cache_data
-def load_assignments(path):
-    assignments = []
-    if not os.path.exists(path):
-        return assignments
-
-    with open(path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            assignments.append(row)
-    return assignments
-
-
-def find_assignment(user_id, part):
-    target_user_id = str(user_id).strip()
-    target_part = str(part).strip().lower()
-
-    for row in load_assignments(ASSIGNMENTS_PATH):
-        row_user_id = str(row.get("user_id", "")).strip()
-        row_part = str(row.get("part", "")).strip().lower()
-
-        if row_user_id == target_user_id and row_part == target_part:
-            condition = str(row.get("condition", "")).strip().upper()
-            if condition not in VALID_CONDITIONS:
-                return None, "Invalid or missing condition in assignments.csv."
-
-            try:
-                start_row = int(row.get("start_row", 0))
-                end_row = int(row.get("end_row", 0))
-            except Exception:
-                return None, "Invalid start_row or end_row in assignments.csv."
-
-            return {
-                "user_id": row_user_id,
-                "part": row_part,
-                "condition": condition,
-                "batch_id": str(row.get("batch_id", "")).strip(),
-                "start_row": start_row,
-                "end_row": end_row,
-            }, ""
-
-    return None, "This User ID is not assigned to Part 2."
 
 
 def split_numbered_list(text):
@@ -130,12 +44,10 @@ def render_candidate_text(text: str):
     def normalize_markdown_headings(raw: str) -> str:
         raw = re.sub(r"(?<!\n)\s+(#{1,6})\s+", r"\n\1 ", raw)
         raw = split_numbered_list(raw)
-
         def _shift_heading(match):
             hashes = match.group(1)
             level = min(len(hashes) + 3, 6)
             return "#" * level + " "
-
         return re.sub(r"(?m)^(#{1,6})\s+", _shift_heading, raw)
 
     pattern = re.compile(r"\[(?i:sponsor(?:ed)?)\s+(.*?)\]", flags=re.DOTALL)
@@ -228,6 +140,14 @@ def load_data(path):
 
 
 # ================== Condition helpers ==================
+def get_condition():
+    query_params = st.query_params
+    cond = str(query_params.get("cond", "")).upper().strip()
+    if cond not in VALID_CONDITIONS:
+        return None
+    return cond
+
+
 CONDITION_CONFIG = {
     "C1": {"ad_present": 0, "disclosure_type": "none", "show_global_notice": False, "show_local_label": False},
     "C2": {"ad_present": 1, "disclosure_type": "none", "show_global_notice": False, "show_local_label": False},
@@ -246,23 +166,40 @@ CONDITION_DESC = {
 }
 
 
-def init_session():
+def go_to_condition(cond):
+    st.query_params["cond"] = cond
+
+
+def show_home_page():
+    st.title("Part 2 Survey Conditions")
+    st.write("Choose a condition to open its survey page.")
+    st.markdown("### Conditions")
+
+    for cond in VALID_CONDITIONS:
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            st.button(cond, key=f"home_{cond}", on_click=go_to_condition, args=(cond,), use_container_width=True)
+        with col2:
+            st.markdown(f"**{cond}**: {CONDITION_DESC[cond]}")
+
+    # Direct links removed as requested
+
+
+def init_session_for_condition(condition):
+    if st.session_state.get("active_condition") != condition:
+        st.session_state.active_condition = condition
+        st.session_state.page = "user_id"
+        st.session_state.user_id = st.session_state.get("user_id", "")
+
     if "page" not in st.session_state:
         st.session_state.page = "user_id"
     if "user_id" not in st.session_state:
         st.session_state.user_id = ""
-    if "assignment" not in st.session_state:
-        st.session_state.assignment = None
-    if "active_condition" not in st.session_state:
-        st.session_state.active_condition = None
-    if "sample_history" not in st.session_state:
-        st.session_state.sample_history = []
-    if "override_sample_id" not in st.session_state:
-        st.session_state.override_sample_id = None
 
 
-def show_user_id_page():
+def show_user_id_page(condition):
     st.title("Part 2 Survey")
+    st.markdown(f"Condition: **{condition}**")
     st.markdown("Please enter your User ID to begin.")
 
     user_id = st.text_input(
@@ -271,23 +208,22 @@ def show_user_id_page():
         placeholder="e.g. user_001",
     )
 
-    continue_clicked = st.button("Continue", use_container_width=True)
+    col_continue, col_back = st.columns([1, 1])
+    with col_continue:
+        continue_clicked = st.button("Continue", use_container_width=True)
+    with col_back:
+        back_clicked = st.button("Back to home", use_container_width=True)
+
+    if back_clicked:
+        st.query_params["cond"] = ""
+        st.session_state.page = "user_id"
+        st.rerun()
 
     if continue_clicked:
         if not user_id.strip():
             st.warning("Please enter your User ID.")
             st.stop()
-
-        assignment, error_msg = find_assignment(user_id.strip(), "part2")
-        if assignment is None:
-            st.warning(error_msg)
-            st.stop()
-
         st.session_state.user_id = user_id.strip()
-        st.session_state.assignment = assignment
-        st.session_state.active_condition = assignment["condition"]
-        st.session_state.sample_history = []
-        st.session_state.override_sample_id = None
         st.session_state.page = "calibration"
         st.rerun()
 
@@ -364,46 +300,31 @@ def build_task_pool_for_condition(samples, condition):
     return task_pool
 
 
-def is_skipped_value(value) -> bool:
-    return str(value).strip().lower() in {"yes", "true", "1", "t"}
+def is_skipped_row(row: dict) -> bool:
+    return str(row.get("skipped", "")).strip().lower() == "yes"
 
 
-def load_completed_sample_ids(user_id, condition, include_skipped: bool = False):
-    supabase = get_supabase_client()
-
-    try:
-        response = (
-            supabase.table(SUPABASE_TABLE)
-            .select("sample_id, skipped")
-            .eq("user_id", user_id)
-            .eq("condition", condition)
-            .execute()
-        )
-    except Exception as e:
-        st.error(f"Failed to load completed samples from Supabase: {e}")
-        st.stop()
+def load_completed_sample_ids(results_path, condition, include_skipped: bool = False):
+    if not os.path.exists(results_path):
+        return set()
 
     completed = set()
-    for row in response.data or []:
-        if not include_skipped and is_skipped_value(row.get("skipped", "")):
-            continue
-        sample_id = row.get("sample_id", "")
-        if sample_id:
-            completed.add(str(sample_id))
-
+    with open(results_path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get("condition", "") != condition:
+                continue
+            if not include_skipped and is_skipped_row(row):
+                continue
+            sample_id = row.get("sample_id", "")
+            if sample_id:
+                completed.add(str(sample_id))
     return completed
 
 
 def get_next_unfinished_task(task_pool, completed_ids):
     for task in task_pool:
         if task["sample_id"] not in completed_ids:
-            return task
-    return None
-
-
-def get_task_by_sample_id(task_pool, sample_id):
-    for task in task_pool:
-        if task["sample_id"] == sample_id:
             return task
     return None
 
@@ -692,98 +613,32 @@ def render_radio_question(q_key: str, label: str, options: list, condition: str,
     )
 
 
-def save_result(sample, user_id, batch_id, condition, response_source, choices, reading_time_seconds, skipped: bool = False):
-    payload = {
-        "user_id": user_id,
-        "batch_id": batch_id,
-        "condition": condition,
-        "sample_id": sample["id"],
-        "Q1": choices.get("Q1", "") if not skipped else "",
-        "Q2": choices.get("Q2", "") if not skipped else "",
-        "Q3": choices.get("Q3", "") if not skipped else "",
-        "Q4": choices.get("Q4", "") if not skipped else "",
-        "Q5": choices.get("Q5", "") if not skipped else "",
-        "Q6": choices.get("Q6", "") if not skipped else "",
-        "Q7": choices.get("Q7", "") if not skipped else "",
-        "reading_time_seconds": reading_time_seconds,
-        "skipped": skipped,
-    }
-
-    supabase = get_supabase_client()
-
-    try:
-        (
-            supabase.table(SUPABASE_TABLE)
-            .upsert(payload, on_conflict="user_id,condition,sample_id")
-            .execute()
-        )
-    except Exception as e:
-        st.error(
-            "Failed to save result to Supabase. "
-            "Make sure part2_results has a unique constraint on (user_id, condition, sample_id). "
-            f"Error: {e}"
-        )
-        st.stop()
-
-
-def go_back_to_previous_sample(condition):
-    history = st.session_state.get("sample_history", [])
-    if not history:
-        return
-
-    previous_sample_id = history.pop()
-    st.session_state.sample_history = history
-    st.session_state.override_sample_id = previous_sample_id
-
-    timer_key = f"reading_start_{condition}_{previous_sample_id}"
-    st.session_state[timer_key] = time.time()
-
-    st.rerun()
-
-
 inject_layout_css()
-init_session()
-
-if st.session_state.page == "user_id":
-    show_user_id_page()
-    st.stop()
-
-assignment = st.session_state.get("assignment")
-if assignment is None:
-    st.session_state.page = "user_id"
-    st.rerun()
-
-condition = assignment["condition"]
-user_id = st.session_state.user_id
-batch_id = assignment.get("batch_id", "")
-
-if st.session_state.page == "calibration":
-    show_calibration_page(condition)
-    st.stop()
 
 data = load_data(DATA_PATH)
 if not data:
     st.error(f"No data found. Please check: {DATA_PATH}")
     st.stop()
 
-start_row = assignment["start_row"]
-end_row = assignment["end_row"]
-data = data[start_row:end_row]
+condition = get_condition()
+if condition is None:
+    show_home_page()
+    st.stop()
+
+init_session_for_condition(condition)
+if st.session_state.page == "user_id":
+    show_user_id_page(condition)
+    st.stop()
+if st.session_state.page == "calibration":
+    show_calibration_page(condition)
+    st.stop()
 
 config = CONDITION_CONFIG[condition]
 
 task_pool = build_task_pool_for_condition(data, condition)
-completed_ids = load_completed_sample_ids(user_id, condition, include_skipped=False)
-handled_ids = load_completed_sample_ids(user_id, condition, include_skipped=True)
-
-override_sample_id = st.session_state.get("override_sample_id")
-if override_sample_id:
-    current_task = get_task_by_sample_id(task_pool, override_sample_id)
-    if current_task is None:
-        st.session_state.override_sample_id = None
-        current_task = get_next_unfinished_task(task_pool, handled_ids)
-else:
-    current_task = get_next_unfinished_task(task_pool, handled_ids)
+completed_ids = load_completed_sample_ids(LOCAL_RESULTS_PATH, condition, include_skipped=False)
+handled_ids = load_completed_sample_ids(LOCAL_RESULTS_PATH, condition, include_skipped=True)
+current_task = get_next_unfinished_task(task_pool, handled_ids)
 
 if not task_pool:
     st.error("No valid samples were found for this condition.")
@@ -806,13 +661,12 @@ col_left, col_right = st.columns([3, 1])
 with col_left:
     st.header(condition)
 with col_right:
-    if st.button(
-        "Back to previous sample",
-        key="back_previous_sample",
-        disabled=not bool(st.session_state.get("sample_history", [])),
-        use_container_width=True,
-    ):
-        go_back_to_previous_sample(condition)
+    def back_to_home():
+        st.query_params["cond"] = ""
+        st.session_state.page = "user_id"
+    if st.button("Back to home", key="back_home"):
+        back_to_home()
+        st.rerun()
 
 st.markdown(
     f"<div style='color:#666; font-size:0.95rem;'>Completed tasks: {len(completed_ids)} / {len(task_pool)}</div>",
@@ -824,6 +678,8 @@ st.markdown(
     f"<div style='color:#666; font-size:0.95rem;'>Current sample: {current_position} / {len(task_pool)}</div>",
     unsafe_allow_html=True,
 )
+
+user_id = st.session_state.user_id
 
 render_previous_context(sample.get("context", ""), sample.get("turn", 1))
 
@@ -909,6 +765,61 @@ for q_key, label, left_text, right_text in scale_questions_after_ad:
     )
 
 
+def save_result(sample, user_id, condition, response_source, choices, reading_time_seconds, issue_note="", skipped: bool = False):
+    payload = {
+        "sample_id": sample["id"],
+        "user_id": user_id,
+        "condition": condition,
+        "question": sample["question"],
+        "response_source": response_source,
+        "ad_present": CONDITION_CONFIG[condition]["ad_present"],
+        "disclosure_type": CONDITION_CONFIG[condition]["disclosure_type"],
+        "Q1": choices.get("Q1", "") if not skipped else "",
+        "Q2": choices.get("Q2", "") if not skipped else "",
+        "Q3": choices.get("Q3", "") if not skipped else "",
+        "Q4": choices.get("Q4", "") if not skipped else "",
+        "Q5": choices.get("Q5", "") if not skipped else "",
+        "Q6": choices.get("Q6", "") if not skipped else "",
+        "Q7": choices.get("Q7", "") if not skipped else "",
+        "reading_time_seconds": reading_time_seconds,
+        "issue_note": issue_note.strip(),
+        "skipped": "yes" if skipped else "no",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    fieldnames = [
+        "sample_id", "user_id", "condition", "question", "response_source",
+        "ad_present", "disclosure_type", "Q1", "Q2", "Q3", "Q4", "Q5",
+        "Q6", "Q7", "reading_time_seconds", "issue_note", "skipped", "timestamp"
+    ]
+
+    file_exists = os.path.exists(LOCAL_RESULTS_PATH)
+    if file_exists:
+        with open(LOCAL_RESULTS_PATH, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            existing_rows = list(reader)
+            existing_fields = reader.fieldnames or []
+        if "reading_time_seconds" not in existing_fields or "issue_note" not in existing_fields:
+            with open(LOCAL_RESULTS_PATH, "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in existing_rows:
+                    writer.writerow({name: row.get(name, "") for name in fieldnames})
+
+    file_exists = os.path.exists(LOCAL_RESULTS_PATH)
+    with open(LOCAL_RESULTS_PATH, "a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(payload)
+
+
+issue_note = st.text_area(
+    "Optional note / issue report",
+    placeholder="If anything looks wrong, e.g. parsing issue, strange formatting, wrong ad option, write it here.",
+    key=f"issue_note_{condition}_{sample['id']}",
+)
+
 col_submit, col_spacer, col_skip = st.columns([1, 0.5, 1])
 with col_submit:
     submit_clicked = st.button("Submit", use_container_width=True)
@@ -927,55 +838,14 @@ if submit_clicked:
         st.stop()
 
     reading_time_seconds = round(time.time() - st.session_state[timer_key], 3)
-
-    save_result(
-        sample,
-        user_id,
-        batch_id,
-        condition,
-        response_source,
-        choices,
-        reading_time_seconds,
-    )
-
-    if not st.session_state.get("override_sample_id"):
-        history = st.session_state.get("sample_history", [])
-        if not history or history[-1] != current_task["sample_id"]:
-            history.append(current_task["sample_id"])
-        st.session_state.sample_history = history
-
-    st.session_state.override_sample_id = None
-
-    if timer_key in st.session_state:
-        del st.session_state[timer_key]
-
+    save_result(sample, user_id, condition, response_source, choices, reading_time_seconds, issue_note)
+    del st.session_state[timer_key]
     st.success("Saved!")
     st.rerun()
 
 if skip_clicked:
     reading_time_seconds = round(time.time() - st.session_state[timer_key], 3)
-
-    save_result(
-        sample,
-        user_id,
-        batch_id,
-        condition,
-        response_source,
-        choices,
-        reading_time_seconds,
-        skipped=True,
-    )
-
-    if not st.session_state.get("override_sample_id"):
-        history = st.session_state.get("sample_history", [])
-        if not history or history[-1] != current_task["sample_id"]:
-            history.append(current_task["sample_id"])
-        st.session_state.sample_history = history
-
-    st.session_state.override_sample_id = None
-
-    if timer_key in st.session_state:
-        del st.session_state[timer_key]
-
+    save_result(sample, user_id, condition, response_source, choices, reading_time_seconds, issue_note, skipped=True)
+    del st.session_state[timer_key]
     st.info("Skipped.")
     st.rerun()
