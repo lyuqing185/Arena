@@ -808,7 +808,7 @@ def save_result(sample, user_id, condition, response_source, choices, reading_ti
                 for row in existing_rows:
                     writer.writerow({name: row.get(name, "") for name in fieldnames})
 
-    supabase.table("part1_results").insert(payload).execute()
+    supabase.table("part2_results").insert(payload).execute()
 
 
 issue_note = st.text_area(
