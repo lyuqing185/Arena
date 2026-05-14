@@ -8,7 +8,7 @@ import io
 from itertools import combinations
 from urllib.request import urlopen
 from urllib.error import URLError
-from supabase import create_client, Client
+
 st.set_page_config(
     page_title="Part 1 Position Survey",
     layout="wide",
@@ -16,11 +16,12 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "stage4_reorganized_top4_thr0_65_with_id.csv")
+ASSIGNMENTS_PATH = os.path.join(BASE_DIR, "assignments.csv")
 LOCAL_RESULTS_PATH = os.path.join("preview_results_part1_candidate.csv")
 DATA_CSV_URL = os.getenv("DATA_CSV_URL", "")
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+SUPABASE_TABLE = "part1_results"
+
 # Current program version: ordinary candidate fields only.
 # For the prime version, copy this file and change CANDIDATE_FIELD_SPECS.
 CANDIDATE_FIELD_SPECS = [
@@ -80,6 +81,86 @@ def first_nonempty(row, names):
         if value is not None and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def get_secret_value(*keys):
+    for key in keys:
+        try:
+            value = st.secrets[key]
+            if value:
+                return str(value)
+        except Exception:
+            pass
+    return ""
+
+
+@st.cache_resource
+def get_supabase_client():
+    try:
+        from supabase import create_client
+    except ImportError:
+        st.error("The `supabase` package is not installed. Run: pip install supabase")
+        st.stop()
+
+    url = get_secret_value("SUPABASE_URL", "supabase_url")
+    key = get_secret_value("SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "supabase_key")
+
+    try:
+        if not url:
+            url = str(st.secrets["supabase"]["url"])
+        if not key:
+            key = str(st.secrets["supabase"]["key"])
+    except Exception:
+        pass
+
+    if not url or not key:
+        st.error(
+            "Missing Supabase secrets. Add SUPABASE_URL and SUPABASE_KEY, "
+            "or [supabase].url and [supabase].key, to Streamlit secrets."
+        )
+        st.stop()
+
+    return create_client(url, key)
+
+
+@st.cache_data
+def load_assignments(path):
+    assignments = []
+    if not os.path.exists(path):
+        return assignments
+
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            assignments.append(row)
+    return assignments
+
+
+def find_assignment(user_id, part):
+    target_user_id = str(user_id).strip()
+    target_part = str(part).strip().lower()
+
+    for row in load_assignments(ASSIGNMENTS_PATH):
+        row_user_id = str(row.get("user_id", "")).strip()
+        row_part = str(row.get("part", "")).strip().lower()
+
+        if row_user_id == target_user_id and row_part == target_part:
+            try:
+                start_row = int(row.get("start_row", 0))
+                end_row = int(row.get("end_row", 0))
+            except Exception:
+                return None, "Invalid start_row or end_row in assignments.csv."
+
+            return {
+                "user_id": row_user_id,
+                "part": row_part,
+                "condition": str(row.get("condition", "")).strip(),
+                "batch_id": str(row.get("batch_id", "")).strip(),
+                "start_row": start_row,
+                "end_row": end_row,
+            }, ""
+
+    return None, "This User ID is not assigned to Part 1."
 
 
 @st.cache_data
@@ -252,29 +333,45 @@ def render_previous_context(context_raw: str, turn):
                 st.divider()
 
 
-def is_skipped_row(row: dict) -> bool:
-    return str(row.get("skipped", "")).strip().lower() == "yes"
+def is_skipped_value(value) -> bool:
+    return str(value).strip().lower() in {"yes", "true", "1", "t"}
 
 
-def load_completed_task_ids(results_path, include_skipped: bool = False):
-    if not os.path.exists(results_path):
-        return set()
+def load_completed_task_ids(user_id, include_skipped: bool = False):
+    supabase = get_supabase_client()
+
+    try:
+        response = (
+            supabase.table(SUPABASE_TABLE)
+            .select("task_id, skipped")
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except Exception as e:
+        st.error(f"Failed to load completed tasks from Supabase: {e}")
+        st.stop()
 
     completed = set()
-    with open(results_path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if not include_skipped and is_skipped_row(row):
-                continue
-            task_id = row.get("task_id", "")
-            if task_id:
-                completed.add(task_id)
+    for row in response.data or []:
+        if not include_skipped and is_skipped_value(row.get("skipped", "")):
+            continue
+        task_id = row.get("task_id", "")
+        if task_id:
+            completed.add(str(task_id))
+
     return completed
 
 
 def get_next_unfinished_task(task_pool, completed_ids):
     for task in task_pool:
         if task["task_id"] not in completed_ids:
+            return task
+    return None
+
+
+def get_task_by_id(task_pool, task_id):
+    for task in task_pool:
+        if task["task_id"] == task_id:
             return task
     return None
 
@@ -323,53 +420,38 @@ def choice_to_machine_value(choice):
     return ""
 
 
-def winner_field(choice, display_task):
-    machine_choice = choice_to_machine_value(choice)
-    if machine_choice == "left":
-        return display_task["left_field"]
-    if machine_choice == "right":
-        return display_task["right_field"]
-    if machine_choice == "tie":
-        return "tie"
-    return ""
-
-
-def save_result(display_task, user_id, choices, issue_note="", skipped: bool = False):
+def save_result(display_task, user_id, batch_id, choices, issue_note="", skipped: bool = False):
     payload = {
+        "user_id": user_id,
+        "batch_id": batch_id,
         "task_id": display_task["task_id"],
         "sample_id": display_task["sample_id"],
-        "user_id": user_id,
-        "question": display_task["question"],
-        "pair_field_a": display_task["field_a"],
-        "pair_field_b": display_task["field_b"],
         "left_field": display_task["left_field"],
         "right_field": display_task["right_field"],
-        "display_order": display_task["display_order"],
-        "issue_note": issue_note.strip(),
-        "skipped": "yes" if skipped else "no",
-        "timestamp": datetime.utcnow().isoformat(),
+        "Q1_choice": "" if skipped else choice_to_machine_value(choices.get("Q1", "")),
+        "Q2_choice": "" if skipped else choice_to_machine_value(choices.get("Q2", "")),
+        "Q3_choice": "" if skipped else choice_to_machine_value(choices.get("Q3", "")),
+        "Q4_choice": "" if skipped else choice_to_machine_value(choices.get("Q4", "")),
+        "Q5_choice": "" if skipped else choice_to_machine_value(choices.get("Q5", "")),
+        "skipped": skipped,
+        "issue_note": issue_note.strip() or None,
     }
 
-    for q_key in Q_KEYS:
-        raw_choice = choices.get(q_key, "")
-        payload[f"{q_key}_choice"] = "" if skipped else choice_to_machine_value(raw_choice)
-        payload[f"{q_key}_winner_field"] = "" if skipped else winner_field(raw_choice, display_task)
+    supabase = get_supabase_client()
 
-    fieldnames = [
-        "task_id", "sample_id", "user_id", "question",
-        "pair_field_a", "pair_field_b", "left_field", "right_field",
-        "display_order",
-        "issue_note",
-        "Q1_choice", "Q1_winner_field",
-        "Q2_choice", "Q2_winner_field",
-        "Q3_choice", "Q3_winner_field",
-        "Q4_choice", "Q4_winner_field",
-        "Q5_choice", "Q5_winner_field",
-        "skipped",
-        "timestamp",
-    ]
-
-    supabase.table("part1_results").insert(payload).execute()
+    try:
+        (
+            supabase.table(SUPABASE_TABLE)
+            .upsert(payload, on_conflict="user_id,task_id")
+            .execute()
+        )
+    except Exception as e:
+        st.error(
+            "Failed to save result to Supabase. "
+            "Make sure part1_results has a unique constraint on (user_id, task_id). "
+            f"Error: {e}"
+        )
+        st.stop()
 
 
 def reset_choice_state(task_id):
@@ -379,12 +461,17 @@ def reset_choice_state(task_id):
             del st.session_state[key]
 
 
-
 def init_session():
     if "page" not in st.session_state:
         st.session_state.page = "user_id"
     if "user_id" not in st.session_state:
         st.session_state.user_id = ""
+    if "assignment" not in st.session_state:
+        st.session_state.assignment = None
+    if "task_history" not in st.session_state:
+        st.session_state.task_history = []
+    if "override_task_id" not in st.session_state:
+        st.session_state.override_task_id = None
 
 
 def show_user_id_page():
@@ -397,7 +484,16 @@ def show_user_id_page():
         if not user_id.strip():
             st.warning("Please enter your User ID.")
             st.stop()
+
+        assignment, error_msg = find_assignment(user_id.strip(), "part1")
+        if assignment is None:
+            st.warning(error_msg)
+            st.stop()
+
         st.session_state.user_id = user_id.strip()
+        st.session_state.assignment = assignment
+        st.session_state.task_history = []
+        st.session_state.override_task_id = None
         st.session_state.page = "calibration"
         st.rerun()
 
@@ -431,6 +527,18 @@ If the two versions are about equally good on a dimension, choose **Tie**.
         st.rerun()
 
 
+def go_back_to_previous_task():
+    history = st.session_state.get("task_history", [])
+    if not history:
+        return
+
+    previous_task_id = history.pop()
+    st.session_state.task_history = history
+    st.session_state.override_task_id = previous_task_id
+    reset_choice_state(previous_task_id)
+    st.rerun()
+
+
 def main():
     inject_layout_css()
     init_session()
@@ -443,10 +551,19 @@ def main():
         show_calibration_page()
         st.stop()
 
+    assignment = st.session_state.get("assignment")
+    if assignment is None:
+        st.session_state.page = "user_id"
+        st.rerun()
+
     data, data_source = load_data(DATA_PATH, DATA_CSV_URL)
     if not data:
         st.error(f"No data found. Please check: {DATA_PATH}")
         st.stop()
+
+    start_row = assignment["start_row"]
+    end_row = assignment["end_row"]
+    data = data[start_row:end_row]
 
     if data_source == "cloud":
         data_source_msg = f"Data source: Cloud URL ({DATA_CSV_URL})"
@@ -459,10 +576,21 @@ def main():
         print(f"[Ad-Arena] {data_source_msg}")
         st.session_state["_last_data_source_msg"] = data_source_msg
 
+    user_id = st.session_state.user_id
+    batch_id = assignment.get("batch_id", "")
+
     task_pool = build_task_pool(data)
-    completed = load_completed_task_ids(LOCAL_RESULTS_PATH, include_skipped=False)
-    handled = load_completed_task_ids(LOCAL_RESULTS_PATH, include_skipped=True)
-    task = get_next_unfinished_task(task_pool, handled)
+    completed = load_completed_task_ids(user_id, include_skipped=False)
+    handled = load_completed_task_ids(user_id, include_skipped=True)
+
+    override_task_id = st.session_state.get("override_task_id")
+    if override_task_id:
+        task = get_task_by_id(task_pool, override_task_id)
+        if task is None:
+            st.session_state.override_task_id = None
+            task = get_next_unfinished_task(task_pool, handled)
+    else:
+        task = get_next_unfinished_task(task_pool, handled)
 
     st.title("Part 1 Position Survey")
     st.markdown(
@@ -485,9 +613,14 @@ def main():
         st.success("All candidate-pair tasks have been completed.")
         st.stop()
 
-    display_task = prepare_display_task(task)
+    if st.button(
+        "Back to previous task",
+        use_container_width=True,
+        disabled=not bool(st.session_state.get("task_history", [])),
+    ):
+        go_back_to_previous_task()
 
-    user_id = st.session_state.user_id
+    display_task = prepare_display_task(task)
 
     render_previous_context(display_task.get("context", ""), display_task.get("turn", 1))
 
@@ -519,10 +652,11 @@ def main():
             horizontal=True,
         )
 
+
     issue_note = st.text_area(
-        "Optional note / issue report",
-        placeholder="If anything looks wrong, e.g. parsing issue, strange formatting, wrong candidate, write it here.",
+        "If you notice any problem with this item, please briefly describe it here. You may leave it blank.",
         key=f"issue_note_{display_task['task_id']}",
+        height=80,
     )
 
     col_submit, col_spacer, col_skip = st.columns([1, 0.5, 1])
@@ -536,7 +670,15 @@ def main():
             st.warning("Please answer all 5 questions before submitting.")
             st.stop()
 
-        save_result(display_task, user_id.strip(), choices, issue_note)
+        save_result(display_task, user_id.strip(), batch_id, choices, issue_note)
+
+        if not st.session_state.get("override_task_id"):
+            history = st.session_state.get("task_history", [])
+            if not history or history[-1] != display_task["task_id"]:
+                history.append(display_task["task_id"])
+            st.session_state.task_history = history
+
+        st.session_state.override_task_id = None
         reset_choice_state(display_task["task_id"])
 
         order_key = f"display_order_{display_task['task_id']}"
@@ -547,7 +689,15 @@ def main():
         st.rerun()
 
     if skip_clicked:
-        save_result(display_task, user_id.strip(), choices, issue_note, skipped=True)
+        save_result(display_task, user_id.strip(), batch_id, choices, issue_note, skipped=True)
+
+        if not st.session_state.get("override_task_id"):
+            history = st.session_state.get("task_history", [])
+            if not history or history[-1] != display_task["task_id"]:
+                history.append(display_task["task_id"])
+            st.session_state.task_history = history
+
+        st.session_state.override_task_id = None
         reset_choice_state(display_task["task_id"])
 
         order_key = f"display_order_{display_task['task_id']}"
