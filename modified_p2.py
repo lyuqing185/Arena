@@ -6,7 +6,7 @@ import re
 import json
 import ast
 import time
-
+from supabase import create_client, Client
 st.set_page_config(
     page_title="Part 2 Survey",
     layout="wide",
@@ -16,7 +16,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "stage4_reorganized_top4_thr0_65_with_id.csv")
 LOCAL_RESULTS_PATH = os.path.join("preview_results_part2.csv")
 VALID_CONDITIONS = ["C1", "C2", "C3", "C4", "C5"]
-
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def split_numbered_list(text):
     pattern = r"(\d+\.)\s+"
@@ -806,12 +808,7 @@ def save_result(sample, user_id, condition, response_source, choices, reading_ti
                 for row in existing_rows:
                     writer.writerow({name: row.get(name, "") for name in fieldnames})
 
-    file_exists = os.path.exists(LOCAL_RESULTS_PATH)
-    with open(LOCAL_RESULTS_PATH, "a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(payload)
+    supabase.table("part1_results").insert(payload).execute()
 
 
 issue_note = st.text_area(
