@@ -814,9 +814,9 @@ def main():
         st.error(f"No data found. Please check: {DATA_PATH}")
         st.stop()
 
-    start_row = assignment.get("start_row", 0)
-    end_row = assignment.get("end_row")
-    data = data[start_row:end_row] if end_row is not None else data[start_row:]
+        # All groups use the full dataset.
+    # The group choice only determines which candidate pair is compared.
+    data = data
 
     if data_source == "local":
         data_source_msg = f"Data source: Local file ({DATA_PATH})"
@@ -855,7 +855,7 @@ def main():
     if task is not None:
         current_position = get_task_position(task_pool, task)
         st.markdown(
-            f"<div class='meta-text'>Current task: {current_position} / {len(task_pool)}</div>",
+            f"<div class='meta-text'>Group {home_choice}: all rows, {pair_text}</div>",
             unsafe_allow_html=True,
         )
 
