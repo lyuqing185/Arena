@@ -867,9 +867,6 @@ Choose the version you prefer all things considered.
 **Placement**  
 Choose the version that presents the advertisement earlier in the response. This question may appear in a random position.
 
-**Optional feedback**  
-You may briefly explain your choice or note any issue you noticed. This field is optional.
-
 **Your answers are checked for consistency and quality. The final reward depends on careful reading and agreement with the main response pattern. Too many inconsistent or careless answers will reduce the reward according to the study rules.**
 
 If the two versions are about equally good on a dimension, choose **Tie**.
@@ -1026,7 +1023,6 @@ def main():
 
     st.markdown(
         "<p style='font-size:18px; font-weight:600; margin: 0.8rem 0 0.2rem 0;'>"
-        "Optional feedback — Please briefly explain your choice or note any issue you noticed."
         "</p>",
         unsafe_allow_html=True,
     )
