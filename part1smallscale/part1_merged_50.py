@@ -977,7 +977,6 @@ def main():
         st.session_state.override_task_id = None
         reset_choice_state(display_task["task_id"])
 
-        st.success("Saved!")
         st.session_state.scroll_to_top = True
         st.rerun()
 
