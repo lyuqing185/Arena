@@ -14,7 +14,6 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Put part1_50_scale.xlsx in the same folder as this .py file.
 DATA_PATH = os.getenv(
     "DATA_PATH",
     os.path.join(BASE_DIR, "part1_50_scale.xlsx")
@@ -23,33 +22,37 @@ DATA_PATH = os.getenv(
 SUPABASE_TABLE = "part1_results"
 SURVEY_PREFIX = "sponsored"
 
+# All groups use the full dataset.
+# The group choice only determines which candidate-prime pair is compared.
 HOME_BATCHES = {
     "1": {
         "batch_id": "sponsored_home_1_candidate1prime_vs_candidate2prime",
-        "start_row": 0,
-        "end_row": 10,
         "field_a": "candidate_1_prime",
         "field_b": "candidate_2_prime",
     },
     "2": {
         "batch_id": "sponsored_home_2_candidate2prime_vs_candidate3prime",
-        "start_row": 10,
-        "end_row": 20,
         "field_a": "candidate_2_prime",
         "field_b": "candidate_3_prime",
     },
     "3": {
         "batch_id": "sponsored_home_3_candidate2prime_vs_candidate4prime",
-        "start_row": 20,
-        "end_row": 30,
         "field_a": "candidate_2_prime",
         "field_b": "candidate_4_prime",
     },
     "4": {
         "batch_id": "sponsored_home_4_candidate1prime_vs_candidate4prime",
-        "start_row": 30,
-        "end_row": 50,
         "field_a": "candidate_1_prime",
+        "field_b": "candidate_4_prime",
+    },
+    "5": {
+        "batch_id": "sponsored_home_5_candidate1prime_vs_candidate3prime",
+        "field_a": "candidate_1_prime",
+        "field_b": "candidate_3_prime",
+    },
+    "6": {
+        "batch_id": "sponsored_home_6_candidate3prime_vs_candidate4prime",
+        "field_a": "candidate_3_prime",
         "field_b": "candidate_4_prime",
     },
 }
@@ -180,6 +183,12 @@ def inject_layout_css():
     )
 
 
+def format_pair_text(field_a: str, field_b: str) -> str:
+    left = field_a.replace("_prime", "").replace("_", "")
+    right = field_b.replace("_prime", "").replace("_", "")
+    return f"{left} vs {right}"
+
+
 def scroll_to_top_if_needed():
     if st.session_state.get("scroll_to_top", False):
         st.session_state.scroll_to_top = False
@@ -250,8 +259,6 @@ def make_assignment(user_id, home_choice):
         "condition": "",
         "home_choice": str(home_choice),
         "batch_id": batch["batch_id"],
-        "start_row": batch["start_row"],
-        "end_row": batch["end_row"],
         "field_a": batch["field_a"],
         "field_b": batch["field_b"],
     }
@@ -780,10 +787,19 @@ def show_user_id_page():
 
     home_choice = st.radio(
         "Dataset group",
-        ["1", "2", "3", "4"],
+        ["1", "2", "3", "4", "5", "6"],
         index=None,
         horizontal=True,
     )
+
+    if home_choice:
+        batch = HOME_BATCHES[str(home_choice)]
+        pair_text = format_pair_text(batch["field_a"], batch["field_b"])
+
+        st.markdown(
+            f"<div class='meta-text'>Group {home_choice}: all rows, {pair_text}</div>",
+            unsafe_allow_html=True,
+        )
 
     required_prefix = SURVEY_PREFIX + "_"
     st.markdown(f"Please enter your User ID. It must start with `{required_prefix}`.")
@@ -893,10 +909,6 @@ def main():
         st.error(f"No data found. Please check: {DATA_PATH}")
         st.stop()
 
-    start_row = assignment.get("start_row", 0)
-    end_row = assignment.get("end_row")
-    data = data[start_row:end_row] if end_row is not None else data[start_row:]
-
     if data_source == "local":
         data_source_msg = f"Data source: Local file ({DATA_PATH})"
     else:
@@ -908,14 +920,15 @@ def main():
 
     user_id = st.session_state.user_id
     batch_id = assignment.get("batch_id", "")
+    home_choice = assignment.get("home_choice", "")
 
     field_a = assignment.get("field_a", "candidate_1_prime")
     field_b = assignment.get("field_b", "candidate_2_prime")
+    pair_text = format_pair_text(field_a, field_b)
 
     task_pool = build_task_pool(data, field_a, field_b)
     init_display_orders(task_pool, user_id, batch_id)
 
-    completed = load_completed_task_ids(user_id, include_skipped=False)
     handled = load_completed_task_ids(user_id, include_skipped=True)
 
     override_task_id = st.session_state.get("override_task_id")
@@ -931,19 +944,20 @@ def main():
 
     st.title("Part 1 Position Survey")
 
-    if task is not None:
-        current_position = get_task_position(task_pool, task)
-        st.markdown(
-            f"<div class='meta-text'>Current task: {current_position} / {len(task_pool)}</div>",
-            unsafe_allow_html=True,
-        )
-
     if not task_pool:
         st.error(
             f"No valid candidate pairs were found for {field_a} vs {field_b}. "
             "Please check whether the selected candidate-prime columns are present and non-empty."
         )
         st.stop()
+
+    if task is not None:
+        current_position = get_task_position(task_pool, task)
+        st.markdown(
+            f"<div class='meta-text'>Group {home_choice}: all rows, {pair_text} "
+            f"({current_position}/{len(task_pool)})</div>",
+            unsafe_allow_html=True,
+        )
 
     if task is None:
         st.success("All candidate-pair tasks have been completed.")
