@@ -710,6 +710,7 @@ def save_result(
     attention_target_field="",
     attention_target_ad="",
     attention_text_input="",
+    feedback_text="",
     skipped: bool = False,
 ):
     payload = {
@@ -738,6 +739,7 @@ def save_result(
         "attention_target_field": "" if skipped else attention_target_field,
         "attention_target_ad": "" if skipped else attention_target_ad,
         "attention_text_input": "" if skipped else attention_text_input,
+        "feedback": str(feedback_text or "").strip(),
         "skipped": skipped,
     }
 
@@ -752,7 +754,8 @@ def save_result(
     except Exception as e:
         st.error(
             "Failed to save result to Supabase. "
-            "Make sure part1_results has a unique constraint on (user_id, task_id). "
+            "Make sure part1_results has a unique constraint on (user_id, task_id), "
+            "and make sure the feedback column exists. "
             f"Error: {e}"
         )
         st.stop()
@@ -763,6 +766,10 @@ def reset_choice_state(task_id):
         key = f"{q_key}_{task_id}"
         if key in st.session_state:
             del st.session_state[key]
+
+    feedback_key = f"feedback_{safe_key_part(task_id)}"
+    if feedback_key in st.session_state:
+        del st.session_state[feedback_key]
 
 
 def init_session():
@@ -859,6 +866,9 @@ Choose the version you prefer all things considered.
 
 **Placement**  
 Choose the version that presents the advertisement earlier in the response. This question may appear in a random position.
+
+**Optional feedback**  
+You may briefly explain your choice or note any issue you noticed. This field is optional.
 
 **Your answers are checked for consistency and quality. The final reward depends on careful reading and agreement with the main response pattern. Too many inconsistent or careless answers will reduce the reward according to the study rules.**
 
@@ -1014,6 +1024,20 @@ def main():
             horizontal=True,
         )
 
+    st.markdown(
+        "<p style='font-size:18px; font-weight:600; margin: 0.8rem 0 0.2rem 0;'>"
+        "Optional feedback — Please briefly explain your choice or note any issue you noticed."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    feedback_text = st.text_area(
+        "Optional feedback",
+        key=f"feedback_{safe_key_part(display_task['task_id'])}",
+        height=100,
+        label_visibility="collapsed",
+    )
+
     col_submit, col_spacer, col_skip = st.columns([1, 0.5, 1])
 
     with col_submit:
@@ -1036,6 +1060,7 @@ def main():
             attention_target_field=attention_metadata["attention_target_field"],
             attention_target_ad=attention_metadata["attention_target_ad"],
             attention_text_input=attention_text_input,
+            feedback_text=feedback_text,
         )
 
         if not st.session_state.get("override_task_id"):
@@ -1063,6 +1088,7 @@ def main():
             attention_target_field=attention_metadata["attention_target_field"],
             attention_target_ad=attention_metadata["attention_target_ad"],
             attention_text_input=attention_text_input,
+            feedback_text=feedback_text,
             skipped=True,
         )
 
