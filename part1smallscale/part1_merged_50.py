@@ -57,6 +57,7 @@ HOME_BATCHES = {
         "field_b": "candidate_4",
     },
 }
+
 CANDIDATE_FIELD_SPECS = {
     "candidate_1": ["candidate1", "candidate_1", "Candidate1", "Candidate_1"],
     "candidate_2": ["candidate2", "candidate_2", "Candidate2", "Candidate_2"],
@@ -614,6 +615,7 @@ def save_result(
     attention_target_field="",
     attention_target_ad="",
     attention_text_input="",
+    feedback_text="",
     skipped: bool = False,
 ):
     payload = {
@@ -642,6 +644,7 @@ def save_result(
         "attention_target_field": "" if skipped else attention_target_field,
         "attention_target_ad": "" if skipped else attention_target_ad,
         "attention_text_input": "" if skipped else attention_text_input,
+        "feedback": str(feedback_text or "").strip(),
         "skipped": skipped,
     }
 
@@ -656,7 +659,8 @@ def save_result(
     except Exception as e:
         st.error(
             "Failed to save result to Supabase. "
-            "Make sure part1_results has a unique constraint on (user_id, task_id). "
+            "Make sure part1_results has a unique constraint on (user_id, task_id), "
+            "and make sure the feedback column exists. "
             f"Error: {e}"
         )
         st.stop()
@@ -667,6 +671,10 @@ def reset_choice_state(task_id):
         key = f"{q_key}_{task_id}"
         if key in st.session_state:
             del st.session_state[key]
+
+    feedback_key = f"feedback_{safe_key_part(task_id)}"
+    if feedback_key in st.session_state:
+        del st.session_state[feedback_key]
 
 
 def init_session():
@@ -928,6 +936,13 @@ def main():
             horizontal=True,
         )
 
+    feedback_text = st.text_area(
+        "Feedback",
+        key=f"feedback_{safe_key_part(display_task['task_id'])}",
+        height=120,
+        label_visibility="collapsed",
+    )
+
     col_submit, col_spacer, col_skip = st.columns([1, 0.5, 1])
 
     with col_submit:
@@ -950,6 +965,7 @@ def main():
             attention_target_field=attention_metadata["attention_target_field"],
             attention_target_ad=attention_metadata["attention_target_ad"],
             attention_text_input=attention_text_input,
+            feedback_text=feedback_text,
         )
 
         if not st.session_state.get("override_task_id"):
@@ -975,6 +991,7 @@ def main():
             attention_target_field=attention_metadata["attention_target_field"],
             attention_target_ad=attention_metadata["attention_target_ad"],
             attention_text_input=attention_text_input,
+            feedback_text=feedback_text,
             skipped=True,
         )
 
