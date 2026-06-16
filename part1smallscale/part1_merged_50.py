@@ -14,7 +14,6 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Put part1_50_scale.xlsx in the same folder as this .py file.
 DATA_PATH = os.getenv(
     "DATA_PATH",
     os.path.join(BASE_DIR, "selected_samples_4_candidates.csv")
@@ -23,34 +22,27 @@ DATA_PATH = os.getenv(
 SUPABASE_TABLE = "part1_results"
 SURVEY_PREFIX = "merged"
 
-# Home page groups. Python slicing is left-closed and right-open:
-# 0:10 = rows 1-10, 10:20 = rows 11-20, etc.
+# Home page groups.
+# All groups use the full dataset.
+# The group choice only determines which candidate pair is compared.
 HOME_BATCHES = {
     "1": {
         "batch_id": "home_1_candidate1_vs_candidate2",
-        "start_row": 0,
-        "end_row": 10,
         "field_a": "candidate_1",
         "field_b": "candidate_2",
     },
     "2": {
         "batch_id": "home_2_candidate2_vs_candidate3",
-        "start_row": 10,
-        "end_row": 20,
         "field_a": "candidate_2",
         "field_b": "candidate_3",
     },
     "3": {
         "batch_id": "home_3_candidate2_vs_candidate4",
-        "start_row": 20,
-        "end_row": 30,
         "field_a": "candidate_2",
         "field_b": "candidate_4",
     },
     "4": {
         "batch_id": "home_4_candidate1_vs_candidate4",
-        "start_row": 30,
-        "end_row": 50,
         "field_a": "candidate_1",
         "field_b": "candidate_4",
     },
@@ -180,7 +172,7 @@ def get_supabase_client():
 
 
 def make_assignment(user_id, home_choice):
-    """No assignments.csv is needed. The home choice determines row range and candidate pair."""
+    """No assignments.csv is needed. The home choice determines candidate pair only."""
     batch = HOME_BATCHES[str(home_choice)]
 
     return {
@@ -189,8 +181,6 @@ def make_assignment(user_id, home_choice):
         "condition": "",
         "home_choice": str(home_choice),
         "batch_id": batch["batch_id"],
-        "start_row": batch["start_row"],
-        "end_row": batch["end_row"],
         "field_a": batch["field_a"],
         "field_b": batch["field_b"],
     }
@@ -248,7 +238,7 @@ def load_data(path):
 
 @st.cache_data
 def build_task_pool(samples, field_a, field_b):
-    """Create one fixed comparison task per Excel row, using the candidate pair selected on home page."""
+    """Create one fixed comparison task per data row, using the candidate pair selected on home page."""
     task_pool = []
 
     for sample in samples:
@@ -704,8 +694,7 @@ def show_user_id_page():
             f"{batch['field_b'].replace('_', '')}"
         )
         st.markdown(
-            f"<div class='meta-text'>Group {home_choice}: rows "
-            f"{batch['start_row'] + 1}–{batch['end_row']}, {pair_text}</div>",
+            f"<div class='meta-text'>Group {home_choice}: all rows, {pair_text}</div>",
             unsafe_allow_html=True,
         )
 
@@ -814,10 +803,6 @@ def main():
         st.error(f"No data found. Please check: {DATA_PATH}")
         st.stop()
 
-        # All groups use the full dataset.
-    # The group choice only determines which candidate pair is compared.
-    data = data
-
     if data_source == "local":
         data_source_msg = f"Data source: Local file ({DATA_PATH})"
     else:
@@ -829,14 +814,15 @@ def main():
 
     user_id = st.session_state.user_id
     batch_id = assignment.get("batch_id", "")
+    home_choice = assignment.get("home_choice", "")
 
     field_a = assignment.get("field_a", "candidate_1")
     field_b = assignment.get("field_b", "candidate_2")
+    pair_text = f"{field_a.replace('_', '')} vs {field_b.replace('_', '')}"
 
     task_pool = build_task_pool(data, field_a, field_b)
     init_display_orders(task_pool, user_id, batch_id)
 
-    completed = load_completed_task_ids(user_id, include_skipped=False)
     handled = load_completed_task_ids(user_id, include_skipped=True)
 
     override_task_id = st.session_state.get("override_task_id")
@@ -850,21 +836,20 @@ def main():
 
     st.title("Part 1 Position Survey")
 
-    
-
-    if task is not None:
-        current_position = get_task_position(task_pool, task)
-        st.markdown(
-            f"<div class='meta-text'>Group {home_choice}: all rows, {pair_text}</div>",
-            unsafe_allow_html=True,
-        )
-
     if not task_pool:
         st.error(
             f"No valid candidate pairs were found for {field_a} vs {field_b}. "
             "Please check whether the selected candidate columns and matching *_ad_llm columns are non-empty."
         )
         st.stop()
+
+    if task is not None:
+        current_position = get_task_position(task_pool, task)
+        st.markdown(
+            f"<div class='meta-text'>Group {home_choice}: all rows, {pair_text} "
+            f"({current_position}/{len(task_pool)})</div>",
+            unsafe_allow_html=True,
+        )
 
     if task is None:
         st.success("All candidate-pair tasks have been completed.")
