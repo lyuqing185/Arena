@@ -16,7 +16,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DATA_PATH = os.getenv(
     "DATA_PATH",
-    os.path.join(BASE_DIR, "part1_50_scale.xlsx")
+    os.path.join(BASE_DIR, "selected_samples_4_candidates.csv")
 )
 
 SUPABASE_TABLE = "part1_results"
