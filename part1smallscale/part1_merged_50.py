@@ -46,8 +46,17 @@ HOME_BATCHES = {
         "field_a": "candidate_1",
         "field_b": "candidate_4",
     },
+    "5": {
+        "batch_id": "home_5_candidate1_vs_candidate3",
+        "field_a": "candidate_1",
+        "field_b": "candidate_3",
+    },
+    "6": {
+        "batch_id": "home_6_candidate3_vs_candidate4",
+        "field_a": "candidate_3",
+        "field_b": "candidate_4",
+    },
 }
-
 CANDIDATE_FIELD_SPECS = {
     "candidate_1": ["candidate1", "candidate_1", "Candidate1", "Candidate_1"],
     "candidate_2": ["candidate2", "candidate_2", "Candidate2", "Candidate_2"],
@@ -682,7 +691,7 @@ def show_user_id_page():
 
     home_choice = st.radio(
         "Dataset group",
-        ["1", "2", "3", "4"],
+        ["1", "2", "3", "4", "5", "6"],
         index=None,
         horizontal=True,
     )
