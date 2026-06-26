@@ -20,10 +20,10 @@ DATA_PATH = os.getenv(
 
 ASSIGNMENT_PATH = os.getenv(
     "ASSIGNMENT_PATH",
-    "/Users/yuqing/Documents/server/git/assignment_sponsor.csv"
+    os.path.join(BASE_DIR, "assignment_sponsor.csv")
 )
 
-USER_ID_PREFIX = os.getenv("USER_ID_PREFIX", "sponsor_")
+USER_ID_PREFIX = "sponsor_"
 
 SUPABASE_TABLE = "part1_results"
 
