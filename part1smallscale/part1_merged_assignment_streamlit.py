@@ -20,10 +20,11 @@ DATA_PATH = os.getenv(
 
 ASSIGNMENT_PATH = os.getenv(
     "ASSIGNMENT_PATH",
-    "/Users/yuqing/Documents/server/git/assignment_merged.csv"
+    os.path.join(BASE_DIR, "assignment_merged.csv")
 )
 
-USER_ID_PREFIX = os.getenv("USER_ID_PREFIX", "merged_")
+USER_ID_PREFIX = "merged_"
+
 
 SUPABASE_TABLE = "part1_results"
 
